@@ -9,41 +9,34 @@ from network import MaskedAttentionGraphs
 from data_utils import GraphDataset, node_masking
 
 from torch_geometric.data import DataLoader
+from torch_geometric.datasets import TUDataset
 
 warnings.filterwarnings('ignore')
 device = "mps" if torch.backends.mps.is_available() else "cpu"
+torch.manual_seed(42)
 
 parser = argparse.ArgumentParser(description='Masked Attention Graphs')
 parser.add_argument('--epochs', type=int, default=200, help='Number of epochs')
 parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
 parser.add_argument('--num_heads', type=int, default=4, help='Number of heads')
-parser.add_argument('--dim_hidden', type=int, default=64, help='Hidden dimension')
+parser.add_argument('--dim_hidden', type=int, default=128, help='Hidden dimension')
 parser.add_argument('--ln', action='store_true', help='Layer normalization')
 parser.add_argument('--d', type=str, required=True, help='path to data')
 parser.add_argument('--thr', type=float, default=0.3, help='Threshold')
 args = parser.parse_args()
 
-func_matrices = np.load(args.d + '/func_matrices.npy')
-labels = np.load(args.d + '/study_group.npy')
+dataset = TUDataset(root='/Users/stefanovannoni/Desktop/PhD/PROGETTI/DTI-fMRI INTEGRATION USING GNN/carmen/data/TUDataset', name='MUTAG')
+dataset = dataset.shuffle()
 
-dataset = GraphDataset(
-    root=args.d + '/processed',
-    func_matrices=func_matrices,
-    labels=labels
-)
-
-n = len(dataset)
-n_train = int(0.8 * n)
-n_test = n - n_train
-
-train_dataset, test_dataset = torch.utils.data.random_split(dataset, [n_train, n_test])
+train_dataset = dataset[:150]   
+test_dataset = dataset[150:]
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
 n_features = dataset[0].num_node_features
-model = MaskedAttentionGraphs(dim_input=n_features, num_outputs=4, dim_output=1, 
+model = MaskedAttentionGraphs(dim_input=n_features, num_outputs=2, dim_output=1, 
                               dim_hidden=args.dim_hidden, num_heads=args.num_heads, ln=args.ln).to(device)
 
 def train():
@@ -65,10 +58,8 @@ def train():
             B, m = batch.num_graphs, batch[0].num_nodes
 
             mask = node_masking(b_ei, b_map, B, m).to(device)
-            matrix_product = batch.x.unsqueeze(0).bmm(batch.x.unsqueeze(0).transpose(1, 2))
-            matrix_masked = matrix_product.masked_fill(mask == 0, float('-inf'))
 
-            logits = model(matrix_masked)
+            logits = model(batch.x.unsqueeze(0), mask)
             loss = loss_fn(logits, batch.y.unsqueeze(0))
             loss.backward()
             optimizer.step()
@@ -102,12 +93,9 @@ def test():
             b_map = batch.batch
             B, m = batch.num_graphs, batch[0].num_nodes
 
-            # Use the same masking and input preparation as in train
             mask = node_masking(b_ei, b_map, B, m).to(device)
-            matrix_product = batch.x.unsqueeze(0).bmm(batch.x.unsqueeze(0).transpose(1, 2))
-            matrix_masked = matrix_product.masked_fill(mask == 0, float('-inf'))
 
-            logits = model(matrix_masked)
+            logits = model(batch.x.unsqueeze(0), mask)
 
             # Calculate predictions and accuracy
             _, predicted = torch.max(logits, dim=1)  # Get the predicted class (logits -> predicted class)

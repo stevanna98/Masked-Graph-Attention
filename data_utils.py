@@ -2,10 +2,11 @@ import numpy as np
 import torch
 
 from torch_geometric.data import Data, InMemoryDataset
-from torch_geometric.utils import unbatch_edge_index
+from torch_geometric.utils import unbatch_edge_index  
 
-def threshold_matrix(matrix, thr=0.3):
-    adj_matrix = (matrix > thr).astype(int)
+def threshold_matrix(matrix, thr=95):
+    threshold = np.percentile(matrix, thr)
+    adj_matrix = (matrix >= threshold).astype(int)
     np.fill_diagonal(adj_matrix, 0)
     return adj_matrix
 
@@ -15,10 +16,12 @@ def node_masking(b_ei, b_map, B, m):
     eis = unbatch_edge_index(b_ei, b_map)
     ei = torch.cat(eis, dim=1)
     mask[graph_idx, ei[0, :], ei[1, :]] = True
-    return ~mask
+    mask[graph_idx, ei[1, :], ei[0, :]] = True
+    binary_mask = (~mask).to(torch.uint8)
+    return binary_mask
 
 class GraphDataset(InMemoryDataset):
-    def __init__(self, root, func_matrices, labels, threshold=0.3, transform=None, pre_transform=None):
+    def __init__(self, root, func_matrices, labels, threshold=95, transform=None, pre_transform=None):
         self.func_matrices = func_matrices
         self.labels = labels  
         self.threshold = threshold

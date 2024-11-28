@@ -16,6 +16,12 @@ class MMAB(nn.Module):
             self.ln1 = nn.LayerNorm(dim_V)
         self.fc_o = nn.Linear(dim_V, dim_V)
 
+    def masked_attention(self, A, M):
+        if M is not None:
+            M = M.repeat(self.num_heads, 1, 1)
+            A = A.masked_fill(M == 0, float('-inf'))
+        return A
+    
     def forward(self, Q, K, M):
         Q = self.fc_q(Q)
         K, V = self.fc_k(K), self.fc_v(K)
@@ -26,9 +32,9 @@ class MMAB(nn.Module):
         V_ = torch.cat(V.split(dim_split, 2), 0)
 
         # Masked attention
-        product = Q_.bmm(K_.transpose(1, 2))
-        masked = product.masked_fill(M == 0, float('-inf'))
-        A = torch.softmax(masked / math.sqrt(self.dim_V), 2)
+        A = Q_.bmm(K_.transpose(1, 2)) / math.sqrt(self.dim_V)
+        A = self.masked_attention(A, M)
+        A = torch.softmax(A, 2) 
 
         # Output
         O = torch.cat((Q_ + A.bmm(V_)).split(Q.size(0), 0), 2)
